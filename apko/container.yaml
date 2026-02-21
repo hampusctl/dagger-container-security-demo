@@ -1,0 +1,16 @@
+contents:
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  repositories:
+    - https://packages.wolfi.dev/os
+  packages:
+    - wolfi-base
+    - python-3.12-base
+
+entrypoint:
+  command: /usr/bin/python3
+
+work-dir: /app
+
+archs:
+  - amd64
