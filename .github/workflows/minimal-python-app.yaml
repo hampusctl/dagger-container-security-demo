@@ -27,7 +27,7 @@ jobs:
           module: github.com/hampusctl/daggerverse/apko@main
           args: "build --config-file=apko/container.yaml publish --address=${{ env.IMAGE_REF }}"
 
-  scan-apko-image:
+  generate-sbom-apko-image:
     runs-on: ubuntu-latest
     needs: build-apko-image
 
@@ -37,19 +37,19 @@ jobs:
         with:
           version: "latest"
           module: github.com/hampusctl/daggerverse/syft@main
-          args: "scan --image=${{ env.IMAGE_REF }} export --path=output"
+          args: "scan --image=${{ env.IMAGE_REF }} export --path=syft-output"
 
       - name: Add SBOM result to GITHUB_STEP_SUMMARY
         shell: bash
         run: |
           set -euo pipefail
-          if test -f "output/report.md"
+          if test -f "syft-output/report.md"
           then
-            cat "output/report.md" >> "$GITHUB_STEP_SUMMARY"
+            cat "syft-output/report.md" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "report.md not found in output/" >> "$GITHUB_STEP_SUMMARY"
-            if test -d "output"; then
-              ls -la "output" >> "$GITHUB_STEP_SUMMARY"
+            echo "report.md not found in syft-output/" >> "$GITHUB_STEP_SUMMARY"
+            if test -d "syft-output"; then
+              ls -la "syft-output" >> "$GITHUB_STEP_SUMMARY"
             fi
             exit 1
           fi
@@ -58,25 +58,49 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: syft-report
-          path: output/
+          path: syft-output/
           if-no-files-found: error
           retention-days: 1
 
+  cve-scan-apko-image:
+    runs-on: ubuntu-latest
+    needs: generate-sbom-apko-image
+    permissions:
+      contents: read
 
-      # - name: Scan published image with grype module
-      #   uses: dagger/dagger-for-github@v8.2.0
-      #   with:
-      #     version: "latest"
-      #     module: https://github.com/hampusctl/daggerverse.git/grype@main
-      #     args: >
-      #       scan-image
-      #       --image-ref=${{ env.IMAGE_REF }}
-      #       export
-      #       --path=dist/grype-report.md
+    steps:
+      - name: Download syft output directory
+        uses: actions/download-artifact@v4
+        with:
+          name: syft-report
+          path: syft-output/
 
-      # - name: Upload scan artifact
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: dagger-apko-grype-report
-      #     path: |
-      #       dist/grype-report.md
+      - name: Scan SBOM with grype module
+        uses: dagger/dagger-for-github@v8.2.0
+        with:
+          version: "latest"
+          module: github.com/hampusctl/daggerverse/grype@main
+          args: "scan --sbom=syft-output/sbom.json export --path=grype-output"
+
+      - name: Add Grype result to GITHUB_STEP_SUMMARY
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -f "grype-output/report.md"
+          then
+            cat "grype-output/report.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "grype report not found in grype-output/" >> "$GITHUB_STEP_SUMMARY"
+            if test -d "grype-output"; then
+              ls -la "grype-output" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 1
+          fi
+
+      - name: Upload grype output directory
+        uses: actions/upload-artifact@v4
+        with:
+          name: grype-report
+          path: grype-output/
+          if-no-files-found: error
+          retention-days: 1
