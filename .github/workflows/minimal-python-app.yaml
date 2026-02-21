@@ -25,9 +25,11 @@ jobs:
         with:
           version: "latest"
           module: github.com/hampusctl/daggerverse/apko@main
-          args: |
-            build --config-file=apko/container.yaml \
-            publish --address=${{ env.IMAGE_REF }}
+          call: |-
+            build \
+            --config-file=apko/container.yaml \
+            publish \
+            --address=${{ env.IMAGE_REF }}
 
   generate-sbom-apko-image:
     runs-on: ubuntu-latest
@@ -39,9 +41,8 @@ jobs:
         with:
           version: "latest"
           module: github.com/hampusctl/daggerverse/syft@main
-          args: |
-            scan \
-            --image=${{ env.IMAGE_REF }} \
+          call: |-
+            scan --image=${{ env.IMAGE_REF }} \
             export \
             --path=syft-output
 
@@ -75,6 +76,8 @@ jobs:
       contents: read
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
       - name: Download syft output directory
         uses: actions/download-artifact@v4
         with:
@@ -86,7 +89,7 @@ jobs:
         with:
           version: "latest"
           module: github.com/hampusctl/daggerverse/grype@main
-          args: |
+          call: |-
             scan \
             --sbom=syft-output/sbom.json \
             --config=".grype.yaml" \
