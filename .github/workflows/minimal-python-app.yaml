@@ -80,7 +80,7 @@ jobs:
         with:
           version: "latest"
           module: github.com/hampusctl/daggerverse/grype@main
-          args: "scan --sbom=syft-output/sbom.json export --path=grype-output"
+          args: "scan --sbom=syft-output/sbom.json --config=.grype.yaml export --path=grype-output"
 
       - name: Add Grype result to GITHUB_STEP_SUMMARY
         shell: bash
