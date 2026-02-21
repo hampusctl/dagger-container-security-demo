@@ -1,66 +1,123 @@
 # Dagger Container Security Demo
 
-This repository demonstrates a minimal container security flow using Dagger modules from Daggerverse.
+This repository demonstrates a minimal container security pipeline using your Daggerverse modules:
+- `apko` to build/publish a minimal Python image
+- `syft` to generate SBOM output
+- `grype` to scan the SBOM for vulnerabilities
 
-Current focus:
-- Build a minimal Python container with Apko
-- Generate an SBOM/report with Syft in GitHub Actions
+## Repository Structure
 
-## What This Repo Contains
+- `apko/container.yaml` - Apko image definition
+- `.github/workflows/minimal-python-app.yaml` - CI/CD pipeline in GitHub Actions
 
-- `apko/container.yaml`: Apko config for a minimal Wolfi-based Python image
-- `.github/workflows/minimal-python-app.yaml`: CI workflow that builds and scans the image through Dagger modules
+## Apko Configuration
 
-## How The Workflow Works
+Current image definition (`apko/container.yaml`):
 
-The workflow `apko-minimal-python-scan` runs on push, pull request, and manual dispatch.
+```yaml
+contents:
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  repositories:
+    - https://packages.wolfi.dev/os
+  packages:
+    - wolfi-base
+    - python-3.12-base
 
-### 1) Build and publish image (Apko module)
+entrypoint:
+  command: /usr/bin/python3
+
+work-dir: /app
+
+archs:
+  - amd64
+```
+
+## CI/CD Flow
+
+Workflow name: `apko-minimal-python-scan`
+
+Triggers:
+
+```yaml
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+```
+
+Shared image reference:
+
+```yaml
+env:
+  IMAGE_REF: ttl.sh/dagger-apko-${{ github.run_id }}:12h
+```
+
+### 1) Build image with Apko
 
 Job: `build-apko-image`
 
-- Uses `dagger/dagger-for-github`
-- Calls module: `github.com/hampusctl/daggerverse/apko@main`
-- Runs:
-  - `build --config-file=apko/container.yaml`
-  - `publish --address=${IMAGE_REF}`
+```yaml
+- name: Build with apko image and publish
+  uses: dagger/dagger-for-github@v8.2.0
+  with:
+    version: "latest"
+    module: github.com/hampusctl/daggerverse/apko@main
+    args: "build --config-file=apko/container.yaml publish --address=${{ env.IMAGE_REF }}"
+```
 
-`IMAGE_REF` is set to a temporary image on `ttl.sh`:
-- `ttl.sh/dagger-apko-${{ github.run_id }}:12h`
+### 2) Generate SBOM with Syft
 
-### 2) Scan image and export output (Syft module)
+Job: `generate-sbom-apko-image` (depends on build)
 
-Job: `scan-apko-image` (depends on build job)
+```yaml
+- name: scan apko image
+  uses: dagger/dagger-for-github@v8.2.0
+  with:
+    version: "latest"
+    module: github.com/hampusctl/daggerverse/syft@main
+    args: "scan --image=${{ env.IMAGE_REF }} export --path=syft-output"
+```
 
-- Uses `dagger/dagger-for-github`
-- Calls module: `github.com/hampusctl/daggerverse/syft@main`
-- Runs:
-  - `scan --image=${IMAGE_REF}`
-  - `export --path=output`
+Then CI:
+- appends `syft-output/report.md` to `GITHUB_STEP_SUMMARY`
+- uploads `syft-output/` as artifact `syft-report`
 
-Syft returns a directory. The workflow:
-- reads `output/report.md` into `GITHUB_STEP_SUMMARY`
-- uploads `output/` as artifact (`syft-report`)
+### 3) Scan SBOM with Grype
 
-## Apko Image Definition
+Job: `cve-scan-apko-image` (depends on SBOM job)
 
-`apko/container.yaml` currently builds a minimal image with:
-- `wolfi-base`
-- `python-3.12-base`
+```yaml
+- name: Download syft output directory
+  uses: actions/download-artifact@v4
+  with:
+    name: syft-report
+    path: syft-output/
 
-Entrypoint:
-- `/usr/bin/python3`
+- name: Scan SBOM with grype module
+  uses: dagger/dagger-for-github@v8.2.0
+  with:
+    version: "latest"
+    module: github.com/hampusctl/daggerverse/grype@main
+    args: "scan --sbom=syft-output/sbom.json export --path=grype-output"
+```
 
-Architecture:
-- `amd64`
+Then CI:
+- appends `grype-output/report.md` to `GITHUB_STEP_SUMMARY`
+- uploads `grype-output/` as artifact `grype-report`
 
-## How To Verify In GitHub Actions
+## Verify a Run
 
 After a workflow run:
-- Open job summary and confirm SBOM report content is visible
-- Download artifact `syft-report` and inspect files in `output/`
+- Open each job summary and verify Syft/Grype report content is rendered
+- Download artifacts:
+  - `syft-report`
+  - `grype-report`
+- Confirm `sbom.json` exists in Syft output and `report.md` exists in both outputs
 
 ## Notes
 
-- The image is published to `ttl.sh` and expires automatically.
-- The commented Grype section in the workflow can be enabled later to add vulnerability scanning after Syft.
+- Images are published to `ttl.sh` and expire automatically.
+- This repo is a baseline for adding more demos (for example Melange and Grant) using the same Dagger-driven workflow pattern.
