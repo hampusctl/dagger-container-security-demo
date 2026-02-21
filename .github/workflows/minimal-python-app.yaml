@@ -118,3 +118,40 @@ jobs:
           path: grype-output/
           if-no-files-found: error
           retention-days: 1
+  license-scan-apko-image:
+    runs-on: ubuntu-latest
+    needs: generate-sbom-apko-image
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download syft output directory
+        uses: actions/download-artifact@v4
+        with:
+          name: syft-report
+          path: syft-output/
+      - name: License scan SBOM with grant module
+        uses: dagger/dagger-for-github@v8.2.0
+        with:
+          version: "latest"
+          module: github.com/hampusctl/daggerverse/grant@main
+          call: |-
+            scan \
+            --sbom=syft-output/sbom.json \
+            --config=".grant.yaml" \
+            export \
+            --path=grant-output
+
+      - name: Add Grant result to GITHUB_STEP_SUMMARY
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -f "grant-output/report.md"
+          then
+            cat "grant-output/report.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "grant report not found in grant-output/" >> "$GITHUB_STEP_SUMMARY"
+            if test -d "grant-output"; then
+              ls -la "grant-output" >> "$GITHUB_STEP_SUMMARY"
